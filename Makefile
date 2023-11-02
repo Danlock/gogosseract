@@ -9,8 +9,6 @@ LDFLAGS = -X 'main.buildTag=$(SHORTBUILDTAG)' -X 'main.buildInfo=$(BUILDINFO)'
 
 COVERAGE_PATH ?= .coverage
 
-TESS_WASM_PATH ?= ../tesseract-wasm
-
 depend: deps
 deps:
 	go get ./...
@@ -28,9 +26,10 @@ test:
 bench:
 	@go test -failfast -benchmem -run=^$ -v -count=2 -bench .  ./...
 
-recompile:
-	cd $(TESS_WASM_PATH) && $(MAKE) docker-build
-	cp --remove-destination $(TESS_WASM_PATH)/dist/tesseract-core.wasm internal/wasm/tesseract-core.wasm
+recompile: tesseract-wasm/
+	git submodule update --init --recursive
+	cd tesseract-wasm/ && $(MAKE) docker-build
+	cp --remove-destination tesseract-wasm/dist/tesseract-core.wasm internal/wasm/tesseract-core.wasm
 	$(MAKE) gen
 
 gen: internal/wasm/tesseract-core.wasm

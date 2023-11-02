@@ -1,0 +1,3 @@
+[submodule "tesseract-wasm"]
+	path = tesseract-wasm
+	url = git@github.com:Danlock/tesseract-wasm.git
