@@ -21,13 +21,11 @@ type TesseractConfig struct {
 	TrainingData io.Reader
 	// Variables are optionally passed into Tesseract as variable config options. Some options are listed at http://www.sk-spell.sk.cx/tesseract-ocr-parameters-in-302-version
 	Variables map[string]string
-	// WazeroRT is an optional wazero.Runtime used to run Tesseract WASM. If this is passed in, no need to call Tesseract.Close, since cleaning up the WazeroRT is on you.
+	// WazeroRT is an optional wazero.Runtime used to run Tesseract WASM. If this is passed in, closing it is now your responsibility, and Tesseract.Close will not do it for you.
 	// This is useful to pass in for effieciently creating multiple Tesseract objects, since each Tesseract client is single threaded.
-	// It is not recommended to use the wazero.Runtime for running other WASM modules than gogosseract.
+	// It is not recommended to use this wazero.Runtime for running WASM modules other than gogosseract.
 	WazeroRT wazero.Runtime
 }
-
-var globalWART = wazero.NewRuntime(context.Background())
 
 // NewTesseract creates a new Tesseract class that is ready for use.
 // The Tesseract WASM is initialized with the given trainingdata, language and variable options.
@@ -94,6 +92,7 @@ type Tesseract struct {
 	waRT         wazero.Runtime
 	module       api.Module
 	ocrEngine    *gen.ClassOCREngine
+	cfg          TesseractConfig
 }
 
 // LoadImage clears any previously loaded images, and loads the provided img into Tesseract WASM
@@ -148,8 +147,18 @@ func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string
 	return text, nil
 }
 
-// Close shuts down all the resources associated with the Tesseract class.
+// Close shuts down all the resources associated with the Tesseract object, including the Wazero Runtime if it wasn't passed in.
 func (t *Tesseract) Close(ctx context.Context) error {
+	logPrefix := "Tesseract.Close"
+	if err := t.ocrEngine.ClearImage(ctx); err != nil {
+		return fmt.Errorf(logPrefix+" t.ocrEngine.ClearImage %w", err)
+	}
+	if err := t.ocrEngine.Delete(ctx); err != nil {
+		return fmt.Errorf(logPrefix+" t.ocrEngine.Delete %w", err)
+	}
+	if t.cfg.WazeroRT != nil {
+		return nil
+	}
 	return t.waRT.Close(ctx)
 }
 
