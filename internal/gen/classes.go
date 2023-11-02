@@ -7,6 +7,75 @@ import (
 	"github.com/jerbob92/wazero-emscripten-embind"
 )
 
+type ClassByteView struct {
+	embind.ClassBase
+}
+
+func (class *ClassByteView) Clone(ctx context.Context) (*ClassByteView, error) {
+	res, err := class.CloneInstance(ctx, class)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	return res.(*ClassByteView), nil
+}
+
+func (class *ClassByteView) Delete(ctx context.Context) error {
+	return class.DeleteInstance(ctx, class)
+}
+
+func (class *ClassByteView) DeleteLater(ctx context.Context) (embind.ClassBase, error) {
+	return class.DeleteInstanceLater(ctx, class)
+}
+
+func (class *ClassByteView) IsDeleted(ctx context.Context) bool {
+	return class.IsInstanceDeleted(ctx, class)
+}
+
+func (class *ClassByteView) IsAliasOf(ctx context.Context, second embind.ClassBase) (bool, error) {
+	return class.IsAliasOfInstance(ctx, class, second)
+}
+
+func (class *ClassByteView) CallMethod(ctx context.Context, name string, arguments ...any) (any, error) {
+	return class.CallInstanceMethod(ctx, class, name, arguments...)
+}
+
+func (class *ClassByteView) SetProperty(ctx context.Context, name string, value any) error {
+	return class.SetInstanceProperty(ctx, class, name, value)
+}
+
+func (class *ClassByteView) GetProperty(ctx context.Context, name string) (any, error) {
+	return class.GetInstanceProperty(ctx, class, name)
+}
+
+func (class *ClassByteView) Data(ctx context.Context) (any, error) {
+	res, err := class.CallMethod(ctx, "data")
+	if err != nil {
+		return nil, err
+	}
+
+	if res == nil {
+		return nil, nil
+	}
+
+	return res.(any), nil
+}
+
+func NewClassByteView(e embind.Engine, ctx context.Context, arg0 uint32) (*ClassByteView, error) {
+	res, err := e.CallPublicSymbol(ctx, "ByteView", arg0)
+	if err != nil {
+		return nil, err
+	}
+
+	if res == nil {
+		return nil, nil
+	}
+
+	return res.(*ClassByteView), nil
+}
+
 type ClassOCREngine struct {
 	embind.ClassBase
 }
@@ -133,7 +202,7 @@ func (class *ClassOCREngine) GetVariable(ctx context.Context, arg0 string) (map[
 	return res.(map[string]any), nil
 }
 
-func (class *ClassOCREngine) LoadImage(ctx context.Context, arg0 uint32) (string, error) {
+func (class *ClassOCREngine) LoadImage(ctx context.Context, arg0 embind.ClassBase) (string, error) {
 	res, err := class.CallMethod(ctx, "loadImage", arg0)
 	if err != nil {
 		return "", err
@@ -146,8 +215,8 @@ func (class *ClassOCREngine) LoadImage(ctx context.Context, arg0 uint32) (string
 	return res.(string), nil
 }
 
-func (class *ClassOCREngine) LoadModel(ctx context.Context, arg0 uint32, arg1 uint32, arg2 string) (string, error) {
-	res, err := class.CallMethod(ctx, "loadModel", arg0, arg1, arg2)
+func (class *ClassOCREngine) LoadModel(ctx context.Context, arg0 embind.ClassBase, arg1 string) (string, error) {
+	res, err := class.CallMethod(ctx, "loadModel", arg0, arg1)
 	if err != nil {
 		return "", err
 	}
@@ -393,109 +462,4 @@ func NewClassVector_TextRect_(e embind.Engine, ctx context.Context) (*ClassVecto
 	}
 
 	return res.(*ClassVector_TextRect_), nil
-}
-
-type ClassVector_string_ struct {
-	embind.ClassBase
-}
-
-func (class *ClassVector_string_) Clone(ctx context.Context) (*ClassVector_string_, error) {
-	res, err := class.CloneInstance(ctx, class)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		return nil, nil
-	}
-	return res.(*ClassVector_string_), nil
-}
-
-func (class *ClassVector_string_) Delete(ctx context.Context) error {
-	return class.DeleteInstance(ctx, class)
-}
-
-func (class *ClassVector_string_) DeleteLater(ctx context.Context) (embind.ClassBase, error) {
-	return class.DeleteInstanceLater(ctx, class)
-}
-
-func (class *ClassVector_string_) IsDeleted(ctx context.Context) bool {
-	return class.IsInstanceDeleted(ctx, class)
-}
-
-func (class *ClassVector_string_) IsAliasOf(ctx context.Context, second embind.ClassBase) (bool, error) {
-	return class.IsAliasOfInstance(ctx, class, second)
-}
-
-func (class *ClassVector_string_) CallMethod(ctx context.Context, name string, arguments ...any) (any, error) {
-	return class.CallInstanceMethod(ctx, class, name, arguments...)
-}
-
-func (class *ClassVector_string_) SetProperty(ctx context.Context, name string, value any) error {
-	return class.SetInstanceProperty(ctx, class, name, value)
-}
-
-func (class *ClassVector_string_) GetProperty(ctx context.Context, name string) (any, error) {
-	return class.GetInstanceProperty(ctx, class, name)
-}
-
-func (class *ClassVector_string_) Get(ctx context.Context, arg0 uint32) (any, error) {
-	res, err := class.CallMethod(ctx, "get", arg0)
-	if err != nil {
-		return nil, err
-	}
-
-	if res == nil {
-		return nil, nil
-	}
-
-	return res.(any), nil
-}
-
-func (class *ClassVector_string_) Push_back(ctx context.Context, arg0 string) error {
-	_, err := class.CallMethod(ctx, "push_back", arg0)
-	return err
-}
-
-func (class *ClassVector_string_) Resize(ctx context.Context, arg0 uint32, arg1 string) error {
-	_, err := class.CallMethod(ctx, "resize", arg0, arg1)
-	return err
-}
-
-func (class *ClassVector_string_) Set(ctx context.Context, arg0 uint32, arg1 string) (bool, error) {
-	res, err := class.CallMethod(ctx, "set", arg0, arg1)
-	if err != nil {
-		return bool(false), err
-	}
-
-	if res == nil {
-		return bool(false), nil
-	}
-
-	return res.(bool), nil
-}
-
-func (class *ClassVector_string_) Size(ctx context.Context) (uint32, error) {
-	res, err := class.CallMethod(ctx, "size")
-	if err != nil {
-		return uint32(0), err
-	}
-
-	if res == nil {
-		return uint32(0), nil
-	}
-
-	return res.(uint32), nil
-}
-
-func NewClassVector_string_(e embind.Engine, ctx context.Context) (*ClassVector_string_, error) {
-	res, err := e.CallPublicSymbol(ctx, "vector_string_")
-	if err != nil {
-		return nil, err
-	}
-
-	if res == nil {
-		return nil, nil
-	}
-
-	return res.(*ClassVector_string_), nil
 }

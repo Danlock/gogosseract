@@ -15,6 +15,11 @@ import (
 // BuildImports implements or mocks the host imports required by Tesseract's compiled WASM module.
 func BuildImports(ctx context.Context, waRT wazero.Runtime, embindEngine embind.Engine, compiledMod wazero.CompiledModule) error {
 	logPrefix := "BuildImports"
+	if waRT.Module("wasi_snapshot_preview1") != nil {
+		// If wasi_snapshot_preview1 was already instantiated, the same wazero runtime is being used for multiple Tesseract clients.
+		return nil
+	}
+
 	wasi_snapshot_preview1.MustInstantiate(ctx, waRT)
 
 	env := waRT.NewHostModuleBuilder("env")

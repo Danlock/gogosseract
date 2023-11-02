@@ -7,6 +7,17 @@ import (
 	"github.com/jerbob92/wazero-emscripten-embind"
 )
 
+func ByteView(e embind.Engine, ctx context.Context) (embind.ClassBase, error) {
+	res, err := e.CallPublicSymbol(ctx, "ByteView")
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	return res.(embind.ClassBase), nil
+}
+
 func OCREngine(e embind.Engine, ctx context.Context) (embind.ClassBase, error) {
 	res, err := e.CallPublicSymbol(ctx, "OCREngine")
 	if err != nil {
@@ -31,17 +42,6 @@ func Vector_IntRect_(e embind.Engine, ctx context.Context) (embind.ClassBase, er
 
 func Vector_TextRect_(e embind.Engine, ctx context.Context) (embind.ClassBase, error) {
 	res, err := e.CallPublicSymbol(ctx, "vector_TextRect_")
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		return nil, nil
-	}
-	return res.(embind.ClassBase), nil
-}
-
-func Vector_string_(e embind.Engine, ctx context.Context) (embind.ClassBase, error) {
-	res, err := e.CallPublicSymbol(ctx, "vector_string_")
 	if err != nil {
 		return nil, err
 	}

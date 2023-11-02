@@ -1,9 +1,11 @@
 package gogosseract
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/danlock/gogosseract/internal/gen"
 	"github.com/danlock/gogosseract/internal/wasm"
@@ -16,21 +18,33 @@ type TesseractConfig struct {
 	// Languages Tesseract scans for. Defaults to "eng".
 	Language string
 	// Training Data Tesseract uses. Required. Must support the provided language. https://github.com/tesseract-ocr/tessdata_fast for more details.
-	TrainingData []byte
-	// Variables are optionally passed into Tesseract as variable config options. http://www.sk-spell.sk.cx/tesseract-ocr-parameters-in-302-version
+	TrainingData io.Reader
+	// Variables are optionally passed into Tesseract as variable config options. Some options are listed at http://www.sk-spell.sk.cx/tesseract-ocr-parameters-in-302-version
 	Variables map[string]string
+	// WazeroRT is an optional wazero.Runtime used to run Tesseract WASM. If this is passed in, no need to call Tesseract.Close, since cleaning up the WazeroRT is on you.
+	// This is useful to pass in for effieciently creating multiple Tesseract objects, since each Tesseract client is single threaded.
+	// It is not recommended to use the wazero.Runtime for running other WASM modules than gogosseract.
+	WazeroRT wazero.Runtime
 }
+
+var globalWART = wazero.NewRuntime(context.Background())
 
 // NewTesseract creates a new Tesseract class that is ready for use.
 // The Tesseract WASM is initialized with the given trainingdata, language and variable options.
 // Each Tesseract object is NOT safe for concurrent use.
 func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err error) {
-	if len(cfg.TrainingData) == 0 {
+	if cfg.TrainingData == nil {
 		return nil, fmt.Errorf("TesseractConfig.TrainingData is required")
 	}
 
-	t.embindEngine = embind.CreateEngine(embind.NewConfig())
-	t.waRT = wazero.NewRuntime(ctx)
+	t = &Tesseract{
+		embindEngine: embind.CreateEngine(embind.NewConfig()),
+		waRT:         cfg.WazeroRT,
+	}
+	if t.waRT == nil {
+		t.waRT = wazero.NewRuntime(ctx)
+	}
+
 	ctx = t.embindEngine.Attach(ctx)
 	logPrefix := "NewTesseract"
 
@@ -44,17 +58,17 @@ func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err e
 		return nil, fmt.Errorf(logPrefix+" gen.NewClassOCREngine %w", err)
 	}
 
-	trainPtr, err := wasm.WriteBytes(ctx, t.module, cfg.TrainingData)
+	trainingDataView, err := t.createByteView(ctx, cfg.TrainingData)
 	if err != nil {
-		return nil, fmt.Errorf(logPrefix+" WriteBytes %w", err)
+		return nil, fmt.Errorf(logPrefix+" createByteView %w", err)
 	}
-	defer wasm.Free(ctx, t.module, trainPtr)
+	defer trainingDataView.Delete(ctx)
 
 	if cfg.Language == "" {
 		cfg.Language = "eng"
 	}
 
-	ocrErr, err := t.ocrEngine.LoadModel(ctx, uint32(trainPtr), uint32(len(cfg.TrainingData)), cfg.Language)
+	ocrErr, err := t.ocrEngine.LoadModel(ctx, trainingDataView, cfg.Language)
 	if err != nil || ocrErr != "" {
 		return nil, fmt.Errorf(logPrefix+" ocrEngine.LoadModel ocrErr (%s) %w", ocrErr, err)
 	}
@@ -68,7 +82,7 @@ func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err e
 	for k, v := range cfg.Variables {
 		ocrErr, err := t.ocrEngine.SetVariable(ctx, k, v)
 		if err != nil || ocrErr != "" {
-			return nil, fmt.Errorf(logPrefix+" ocrEngine.LoadModel ocrErr (%s) %w", ocrErr, err)
+			return nil, fmt.Errorf(logPrefix+" ocrEngine.SetVariable ocrErr (%s) %w", ocrErr, err)
 		}
 	}
 
@@ -82,46 +96,27 @@ type Tesseract struct {
 	ocrEngine    *gen.ClassOCREngine
 }
 
-// LoadImage for convenience loads from an io.Reader, for reading from a file for example.
-func (t *Tesseract) LoadImage(ctx context.Context, imgSrc io.Reader) error {
-	logPrefix := "Tesseract.LoadImage"
-	img, err := io.ReadAll(imgSrc)
-	if err != nil {
-		return fmt.Errorf(logPrefix+" io.ReadAll %w", err)
-	}
-	return t.LoadImageBuf(ctx, img)
-}
-
-// LoadImageBuf clears any previously loaded images, and loads the provided imgSrc into Tesseract WASM
-// for parsing. Unfortunately the image is copied several times. Writing into WASM memory,
-// being parsed by Leptonica into it's Pix object and when Tesseract copies it to it's internal Pix object.
+// LoadImage clears any previously loaded images, and loads the provided img into Tesseract WASM
+// for parsing. Unfortunately the image is fully copied to memory a few times.
+// Leptonica parses it into a Pix object and Tesseract copies that Pix object internally.
 // Keep that in mind when working with large images.
-func (t *Tesseract) LoadImageBuf(ctx context.Context, img []byte) error {
-	logPrefix := "Tesseract.LoadImageBuf"
+func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader) error {
+	logPrefix := "Tesseract.LoadImage"
 
 	if err := t.ocrEngine.ClearImage(ctx); err != nil {
 		return fmt.Errorf(logPrefix+" t.ocrEngine.ClearImage %w", err)
 	}
 
-	imgPtr, err := wasm.WriteBytes(ctx, t.module, img)
+	imgByteView, err := t.createByteView(ctx, img)
 	if err != nil {
-		return fmt.Errorf(logPrefix+" wasm.WriteBytes %w", err)
+		return fmt.Errorf(logPrefix+" createByteView %w", err)
 	}
 	// As Leptonica will copy the image into it's Pix object, we can free it ASAP
-	defer wasm.Free(ctx, t.module, imgPtr)
+	defer imgByteView.Delete(ctx)
 
-	results, err := t.module.ExportedFunction("pixReadMem").Call(ctx, imgPtr, uint64(len(img)))
-	if err != nil {
-		return fmt.Errorf(logPrefix+" pixReadMem results=(%v) %w", results, err)
-	}
-	if len(results) != 1 || results[0] == 0 {
-		return fmt.Errorf(logPrefix + " pixReadMem returned nullptr")
-	}
-	pixPtr := results[0]
-
-	ocrErr, err := t.ocrEngine.LoadImage(ctx, uint32(pixPtr))
+	ocrErr, err := t.ocrEngine.LoadImage(ctx, imgByteView)
 	if err != nil || ocrErr != "" {
-		return fmt.Errorf(logPrefix+" ocrEngine.LoadImage ocrErr=(%v) %w", ocrErr, err)
+		return fmt.Errorf(logPrefix+" ocrEngine.LoadImage ocrErr=(%s) %w", ocrErr, err)
 	}
 
 	return nil
@@ -129,7 +124,10 @@ func (t *Tesseract) LoadImageBuf(ctx context.Context, img []byte) error {
 
 // GetText parses a previously loaded image for text. progressCB is called with a percentage
 // for tracking Tesseract's recognition progress.
-func (t *Tesseract) GetText(ctx context.Context, progressCB func(int)) (string, error) {
+func (t *Tesseract) GetText(ctx context.Context, progressCB func(int32)) (string, error) {
+	if progressCB == nil {
+		progressCB = func(i int32) {}
+	}
 	text, err := t.ocrEngine.GetText(ctx, progressCB)
 	if err != nil {
 		return "", fmt.Errorf("Tesseract.GetText ocrEngine.GetText %w", err)
@@ -139,7 +137,10 @@ func (t *Tesseract) GetText(ctx context.Context, progressCB func(int)) (string, 
 
 // GetHOCR parses a previously loaded image for HOCR text. progressCB is called with a percentage
 // for tracking Tesseract's recognition progress.
-func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int)) (string, error) {
+func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string, error) {
+	if progressCB == nil {
+		progressCB = func(i int32) {}
+	}
 	text, err := t.ocrEngine.GetHOCR(ctx, progressCB)
 	if err != nil {
 		return "", fmt.Errorf("Tesseract.GetHOCR ocrEngine.GetHOCR %w", err)
@@ -150,4 +151,72 @@ func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int)) (string, 
 // Close shuts down all the resources associated with the Tesseract class.
 func (t *Tesseract) Close(ctx context.Context) error {
 	return t.waRT.Close(ctx)
+}
+
+// createByteView streams an io.Reader into WASM memory using io.Copy, emscripten::typed_memory_view and minimal memory.
+// Works optimally if io.Reader is an io.ReadSeeker (like an os.File) or a bytes.Buffer.
+func (t *Tesseract) createByteView(ctx context.Context, reader io.Reader) (*gen.ClassByteView, error) {
+	logPrefix := "Tesseract.createByteView"
+	var size uint64
+	switch src := reader.(type) {
+	case *bytes.Buffer:
+		size = uint64(src.Len())
+	case io.Seeker:
+		// This case covers os.File while being friendly to any other io.ReadSeeker's
+		streamLen, err := src.Seek(0, io.SeekEnd)
+		if err != nil {
+			return nil, fmt.Errorf(logPrefix+" io.Seeker.Seek SeekEnd %w", err)
+		}
+		// Seek back to the beginning so we can read it all
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf(logPrefix+" io.Seeker.Seek SeekStart %w", err)
+		}
+		size = uint64(streamLen)
+	case nil:
+		return nil, fmt.Errorf(logPrefix + " got nil io.Reader")
+	default:
+		// We have failed to avoid copying the data into memory to get the size...
+		// git commit sudoku
+		buf := new(bytes.Buffer)
+		bufLen, err := io.Copy(buf, reader)
+		if err != nil {
+			return nil, fmt.Errorf(logPrefix+" io.Copy %w", err)
+		}
+		// since we read reader, it's empty. point it at buf now.
+		reader = buf
+		size = uint64(bufLen)
+	}
+
+	if size > math.MaxUint32 {
+		return nil, fmt.Errorf(logPrefix+" io.Reader size (%d) too large", size)
+	} else if size == 0 {
+		return nil, fmt.Errorf(logPrefix + " io.Reader was empty")
+	}
+	// Now that we have the size, expose WASM memory for writing into.
+	byteView, err := gen.NewClassByteView(t.embindEngine, ctx, uint32(size))
+	if err != nil {
+		return nil, fmt.Errorf(logPrefix+" gen.NewClassByteView %w", err)
+	}
+
+	byteViewDataI, err := byteView.Data(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(logPrefix+" gen.NewClassByteView %w", err)
+	}
+	byteViewData, ok := byteViewDataI.([]byte)
+	if !ok {
+		return nil, fmt.Errorf(logPrefix+" byteViewDataI unexpected type %T", byteViewDataI)
+	}
+
+	byteViewBuffer := bytes.NewBuffer(byteViewData)
+	byteViewBuffer.Reset()
+
+	written, err := io.Copy(byteViewBuffer, reader)
+	if err != nil {
+		return nil, fmt.Errorf(logPrefix+" io.Copy %w", err)
+	}
+	if uint64(written) != size {
+		return nil, fmt.Errorf(logPrefix+" io.Copy only wrote %d/%d bytes", written, size)
+	}
+
+	return byteView, nil
 }
