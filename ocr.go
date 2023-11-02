@@ -8,49 +8,54 @@ import (
 	"math"
 
 	"github.com/danlock/gogosseract/internal/gen"
-	"github.com/danlock/gogosseract/internal/wasm"
-	embind "github.com/jerbob92/wazero-emscripten-embind"
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 )
 
 type TesseractConfig struct {
-	// Languages Tesseract scans for. Defaults to "eng".
-	Language string
 	// Training Data Tesseract uses. Required. Must support the provided language. https://github.com/tesseract-ocr/tessdata_fast for more details.
 	TrainingData io.Reader
+	// Languages Tesseract scans for. Defaults to "eng".
+	Language string
 	// Variables are optionally passed into Tesseract as variable config options. Some options are listed at http://www.sk-spell.sk.cx/tesseract-ocr-parameters-in-302-version
 	Variables map[string]string
-	// WazeroRT is an optional wazero.Runtime used to run Tesseract WASM. If this is passed in, closing it is now your responsibility, and Tesseract.Close will not do it for you.
-	// This is useful to pass in for effieciently creating multiple Tesseract objects, since each Tesseract client is single threaded.
-	// It is not recommended to use this wazero.Runtime for running WASM modules other than gogosseract.
-	WazeroRT wazero.Runtime
+	// WASM is an optional Webassembly runtime and compilation object. Create with NewWASM.
+	// While a Tesseract is not safe for conccurrent use, we can use a client per goroutine instead.
+	// WASM allows us to do so efficiently by reusing the compiled WASM and Webassembly runtime memory.
+	// Note that Tesseract.Close will not Close the WASMModule if passed in, instead it is your responsibility.
+	WASM *WASMModule
 }
 
 // NewTesseract creates a new Tesseract class that is ready for use.
 // The Tesseract WASM is initialized with the given trainingdata, language and variable options.
 // Each Tesseract object is NOT safe for concurrent use.
 func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err error) {
+	logPrefix := "NewTesseract"
+
 	if cfg.TrainingData == nil {
-		return nil, fmt.Errorf("TesseractConfig.TrainingData is required")
+		return nil, fmt.Errorf(logPrefix + " requires TesseractConfig.TrainingData")
+	}
+
+	if cfg.Language == "" {
+		cfg.Language = "eng"
+	}
+
+	if len(cfg.Variables) == 0 {
+		cfg.Variables = map[string]string{
+			"tessedit_pageseg_mode": "3", // tesseract::PSM_AUTO
+		}
 	}
 
 	t = &Tesseract{
-		embindEngine: embind.CreateEngine(embind.NewConfig()),
-		waRT:         cfg.WazeroRT,
+		WASMModule: cfg.WASM,
 	}
-	if t.waRT == nil {
-		t.waRT = wazero.NewRuntime(ctx)
-	}
-
-	ctx = t.embindEngine.Attach(ctx)
-	logPrefix := "NewTesseract"
-
-	t.module, err = wasm.CompileTesseract(ctx, t.waRT, t.embindEngine)
-	if err != nil {
-		return nil, fmt.Errorf(logPrefix+" wasm.CompileTesseract %w", err)
+	if cfg.WASM == nil {
+		t.WASMModule, err = NewWASM(ctx, WASMConfig{})
+		if err != nil {
+			return nil, fmt.Errorf(logPrefix+" %w", err)
+		}
 	}
 
+	// Create an OCREngine, our WASM wrapper of the tesseract::TessBaseAPI class
+	// Then stream the training model data to it, initializing it for image parsing.
 	t.ocrEngine, err = gen.NewClassOCREngine(t.embindEngine, ctx)
 	if err != nil {
 		return nil, fmt.Errorf(logPrefix+" gen.NewClassOCREngine %w", err)
@@ -58,23 +63,13 @@ func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err e
 
 	trainingDataView, err := t.createByteView(ctx, cfg.TrainingData)
 	if err != nil {
-		return nil, fmt.Errorf(logPrefix+" createByteView %w", err)
+		return nil, fmt.Errorf(logPrefix+" %w", err)
 	}
 	defer trainingDataView.Delete(ctx)
-
-	if cfg.Language == "" {
-		cfg.Language = "eng"
-	}
 
 	ocrErr, err := t.ocrEngine.LoadModel(ctx, trainingDataView, cfg.Language)
 	if err != nil || ocrErr != "" {
 		return nil, fmt.Errorf(logPrefix+" ocrEngine.LoadModel ocrErr (%s) %w", ocrErr, err)
-	}
-
-	if len(cfg.Variables) == 0 {
-		cfg.Variables = map[string]string{
-			"tessedit_pageseg_mode": "3", // tesseract::PSM_AUTO
-		}
 	}
 
 	for k, v := range cfg.Variables {
@@ -88,11 +83,9 @@ func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err e
 }
 
 type Tesseract struct {
-	embindEngine embind.Engine
-	waRT         wazero.Runtime
-	module       api.Module
-	ocrEngine    *gen.ClassOCREngine
-	cfg          TesseractConfig
+	*WASMModule
+	ocrEngine *gen.ClassOCREngine
+	cfg       TesseractConfig
 }
 
 // LoadImage clears any previously loaded images, and loads the provided img into Tesseract WASM
@@ -108,7 +101,7 @@ func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader) error {
 
 	imgByteView, err := t.createByteView(ctx, img)
 	if err != nil {
-		return fmt.Errorf(logPrefix+" createByteView %w", err)
+		return fmt.Errorf(logPrefix+" %w", err)
 	}
 	// As Leptonica will copy the image into it's Pix object, we can free it ASAP
 	defer imgByteView.Delete(ctx)
@@ -125,7 +118,7 @@ func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader) error {
 // for tracking Tesseract's recognition progress.
 func (t *Tesseract) GetText(ctx context.Context, progressCB func(int32)) (string, error) {
 	if progressCB == nil {
-		progressCB = func(i int32) {}
+		progressCB = func(int32) {}
 	}
 	text, err := t.ocrEngine.GetText(ctx, progressCB)
 	if err != nil {
@@ -138,7 +131,7 @@ func (t *Tesseract) GetText(ctx context.Context, progressCB func(int32)) (string
 // for tracking Tesseract's recognition progress.
 func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string, error) {
 	if progressCB == nil {
-		progressCB = func(i int32) {}
+		progressCB = func(int32) {}
 	}
 	text, err := t.ocrEngine.GetHOCR(ctx, progressCB)
 	if err != nil {
@@ -147,7 +140,7 @@ func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string
 	return text, nil
 }
 
-// Close shuts down all the resources associated with the Tesseract object, including the Wazero Runtime if it wasn't passed in.
+// Close shuts down all the resources associated with the Tesseract object
 func (t *Tesseract) Close(ctx context.Context) error {
 	logPrefix := "Tesseract.Close"
 	if err := t.ocrEngine.ClearImage(ctx); err != nil {
@@ -156,19 +149,28 @@ func (t *Tesseract) Close(ctx context.Context) error {
 	if err := t.ocrEngine.Delete(ctx); err != nil {
 		return fmt.Errorf(logPrefix+" t.ocrEngine.Delete %w", err)
 	}
-	if t.cfg.WazeroRT != nil {
+	// Only close the WASMModule if we made it ourselves
+	if t.cfg.WASM != nil {
 		return nil
 	}
-	return t.waRT.Close(ctx)
+	return t.WASMModule.Close(ctx)
 }
 
+// readerWithLen is an interface that generalizes code for bytes.Buffer to anything with a Len() method.
+type readerWithLen interface {
+	io.Reader
+	Len() int
+}
+
+var _ = readerWithLen(new(bytes.Buffer))
+
 // createByteView streams an io.Reader into WASM memory using io.Copy, emscripten::typed_memory_view and minimal memory.
-// Works optimally if io.Reader is an io.ReadSeeker (like an os.File) or a bytes.Buffer.
+// Works optimally if io.Reader is an io.ReadSeeker (like os.File) or a readerWithLen (like bytes.Buffer).
 func (t *Tesseract) createByteView(ctx context.Context, reader io.Reader) (*gen.ClassByteView, error) {
 	logPrefix := "Tesseract.createByteView"
 	var size uint64
 	switch src := reader.(type) {
-	case *bytes.Buffer:
+	case readerWithLen:
 		size = uint64(src.Len())
 	case io.Seeker:
 		// This case covers os.File while being friendly to any other io.ReadSeeker's

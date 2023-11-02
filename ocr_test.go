@@ -5,11 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"io"
+	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/tetratelabs/wazero"
+	"golang.org/x/sync/errgroup"
 )
 
 //go:embed internal/wasm/testdata/eng.traineddata
@@ -18,12 +20,20 @@ var engTrainedData []byte
 //go:embed internal/wasm/testdata/docs.png
 var docsImg []byte
 
+const docsText = "Request body\n\nParameter Required Type\ngeoname false integer\ncredits false integer\ncellTowers false array\nwifiAccessPoints false array\nbluetoothBeacons false array\nsensors false array\n\nfallbacks false array\n"
+
 //go:embed internal/wasm/testdata/logo.png
 var logoImg []byte
 
+const logoText = "o\n\nkubenav\n"
+
 func TestNewTesseract(t *testing.T) {
 	ctx := context.Background()
-	sharedWART := wazero.NewRuntime(ctx)
+	sharedWASM, err := NewWASM(ctx, WASMConfig{})
+	if err != nil {
+		t.Fatalf("NewWASM %v", err)
+	}
+
 	tests := []struct {
 		name    string
 		cfg     TesseractConfig
@@ -40,6 +50,11 @@ func TestNewTesseract(t *testing.T) {
 			true,
 		},
 		{
+			"aggressively nil training data",
+			TesseractConfig{TrainingData: io.Reader(nil)},
+			true,
+		},
+		{
 			"bad variables",
 			TesseractConfig{
 				TrainingData: bytes.NewBuffer(engTrainedData),
@@ -51,7 +66,7 @@ func TestNewTesseract(t *testing.T) {
 			"success no lang",
 			TesseractConfig{
 				TrainingData: bytes.NewBuffer(engTrainedData),
-				WazeroRT:     sharedWART,
+				WASM:         sharedWASM,
 			},
 			false,
 		},
@@ -60,7 +75,7 @@ func TestNewTesseract(t *testing.T) {
 			TesseractConfig{
 				TrainingData: bytes.NewBuffer(engTrainedData),
 				Language:     "tesseractishappywithwhateveraslongasyourtrainingdatamatchesup",
-				WazeroRT:     sharedWART,
+				WASM:         sharedWASM,
 			},
 			false,
 		},
@@ -111,25 +126,25 @@ func TestTesseract_GetText(t *testing.T) {
 			"logo",
 			bytes.NewBuffer(logoImg),
 			false,
-			"o\n\nkubenav\n",
+			logoText,
 		},
 		{
 			"logo file",
 			logoFile,
 			false,
-			"o\n\nkubenav\n",
+			logoText,
 		},
 		{
 			"logo with forced copy",
 			JustAReader{bytes.NewBuffer(logoImg)},
 			false,
-			"o\n\nkubenav\n",
+			logoText,
 		},
 		{
 			"docs",
 			bytes.NewBuffer(docsImg),
 			false,
-			"Request body\n\nParameter Required Type\ngeoname false integer\ncredits false integer\ncellTowers false array\nwifiAccessPoints false array\nbluetoothBeacons false array\nsensors false array\n\nfallbacks false array\n",
+			docsText,
 		},
 	}
 	for _, tt := range tests {
@@ -149,5 +164,52 @@ func TestTesseract_GetText(t *testing.T) {
 				t.Fatalf(diff)
 			}
 		})
+	}
+}
+
+func TestTesseract_GetText_Concurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	waMo, err := NewWASM(ctx, WASMConfig{})
+	if err != nil {
+		t.Fatalf("NewWASM %v", err)
+	}
+	tessPool := make([]*Tesseract, 5)
+	var group errgroup.Group
+	results := make(chan string, len(tessPool))
+	for i := range tessPool {
+		tessPool[i], err = NewTesseract(ctx, TesseractConfig{
+			TrainingData: bytes.NewBuffer(engTrainedData),
+			WASM:         waMo,
+		})
+		if err != nil {
+			t.Fatalf("NewTesseract %v", err)
+		}
+		i := i
+		group.Go(func() error {
+			if err := tessPool[i].LoadImage(ctx, bytes.NewBuffer(docsImg)); err != nil {
+				return err
+			}
+			result, err := tessPool[i].GetText(ctx, func(progress int32) { slog.Info("Tesseract", "id", i, "progress", progress) })
+			if err != nil {
+				return err
+			}
+			results <- result
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		t.Fatalf("Parallel Tesseracts client failed %v", err)
+	}
+	for range tessPool {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for results")
+		case r := <-results:
+			if r != docsText {
+				t.Fatalf("results incorrect (%s)", cmp.Diff(r, docsText))
+			}
+		}
 	}
 }
