@@ -202,8 +202,8 @@ func (class *ClassOCREngine) GetVariable(ctx context.Context, arg0 string) (map[
 	return res.(map[string]any), nil
 }
 
-func (class *ClassOCREngine) LoadImage(ctx context.Context, arg0 embind.ClassBase) (string, error) {
-	res, err := class.CallMethod(ctx, "loadImage", arg0)
+func (class *ClassOCREngine) LoadImage(ctx context.Context, arg0 embind.ClassBase, arg1 bool) (string, error) {
+	res, err := class.CallMethod(ctx, "loadImage", arg0, arg1)
 	if err != nil {
 		return "", err
 	}

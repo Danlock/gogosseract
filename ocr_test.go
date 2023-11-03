@@ -18,6 +18,281 @@ import (
 //go:embed internal/wasm/testdata/eng.traineddata
 var engTrainedData []byte
 
+func TestNewTesseract(t *testing.T) {
+	ctx := context.Background()
+	cache := wazero.NewCompilationCache()
+	tests := []struct {
+		name    string
+		cfg     gogosseract.Config
+		wantErr bool
+	}{
+		{
+			"no training data",
+			gogosseract.Config{},
+			true,
+		},
+		{
+			"empty training data",
+			gogosseract.Config{TrainingData: bytes.NewBuffer([]byte{}), WASMCache: cache},
+			true,
+		},
+		{
+			"bad variables",
+			gogosseract.Config{
+				TrainingData: bytes.NewBuffer(engTrainedData),
+				Variables:    map[string]string{"asdf": "qwer"},
+				WASMCache:    cache,
+			},
+			true,
+		},
+		{
+			"success no lang",
+			gogosseract.Config{
+				TrainingData: bytes.NewBuffer(engTrainedData),
+				WASMCache:    cache,
+			},
+			false,
+		},
+		{
+			"success with lang",
+			gogosseract.Config{
+				TrainingData: bytes.NewBuffer(engTrainedData),
+				Language:     "tesseractishappywithwhateveraslongasyourtrainingdatamatchesup",
+				WASMCache:    cache,
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tess, err := gogosseract.New(ctx, tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NewTesseract() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if err := tess.Close(ctx); err != nil {
+				t.Fatalf("Tesseract.Close() error = %v", err)
+			}
+		})
+	}
+}
+
+type JustAReader struct {
+	buf *bytes.Buffer
+}
+
+func (j JustAReader) Read(p []byte) (n int, err error) {
+	return j.buf.Read(p)
+}
+
+func TestTesseract_GetText(t *testing.T) {
+	ctx := context.Background()
+	tess, err := gogosseract.New(ctx, gogosseract.Config{TrainingData: bytes.NewBuffer(engTrainedData)})
+	if err != nil {
+		t.Fatalf("NewTesseract %v", err)
+	}
+	defer func() {
+		if err := tess.Close(ctx); err != nil {
+			t.Fatalf("Tesseract.Close() error = %v", err)
+		}
+	}()
+
+	logoFile, err := os.Open("./internal/wasm/testdata/logo.png")
+	if err != nil {
+		t.Fatalf("os.Open %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		imgSrc   io.Reader
+		opts     gogosseract.LoadImageOptions
+		wantErr  bool
+		wantText string
+	}{
+		{
+			"nada",
+			&bytes.Buffer{},
+			gogosseract.LoadImageOptions{},
+			true,
+			"",
+		},
+		{
+			"pitifully parse underlined text",
+			bytes.NewBuffer(underlineImg),
+			gogosseract.LoadImageOptions{},
+			false,
+			"|\ner\ntt\nle\nnews\nt\n’\n0\n4]\ne\nR\n\nas\nC\n\na\nhin F\n\n1p\n\n0\n\nD\n\nL)\n\nwi M\ni te\n\n",
+		},
+		{
+			"after underline removal",
+			bytes.NewBuffer(underlineImg),
+			gogosseract.LoadImageOptions{RemoveUnderlines: true},
+			false,
+			"Adopt A Dolphin\nSubscribe to the Dolphin\nReport newsletter\nDolphin Facts\n\nQuestions 8 Answers\n\nDolphin Database\n",
+		},
+		{
+			"logo PNG",
+			bytes.NewBuffer(logoImg),
+			gogosseract.LoadImageOptions{},
+			false,
+			logoText,
+		},
+		{
+			"logo file",
+			logoFile,
+			gogosseract.LoadImageOptions{},
+			false,
+			logoText,
+		},
+		{
+			"logo with forced copy",
+			JustAReader{bytes.NewBuffer(logoImg)},
+			gogosseract.LoadImageOptions{},
+			false,
+			logoText,
+		},
+		{
+			"docs",
+			bytes.NewBuffer(docsImg),
+			gogosseract.LoadImageOptions{},
+			false,
+			docsText,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tess.LoadImage(ctx, tt.imgSrc, tt.opts); (err != nil) != tt.wantErr {
+				t.Fatalf("Tesseract.LoadImage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			text, err := tess.GetText(ctx, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Tesseract.GetText() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			diff := cmp.Diff(text, tt.wantText)
+			if diff != "" {
+				t.Fatalf(diff)
+			}
+		})
+	}
+}
+
+func TestTesseract_GetHOCR(t *testing.T) {
+	ctx := context.Background()
+	tess, err := gogosseract.New(ctx, gogosseract.Config{TrainingData: bytes.NewBuffer(engTrainedData)})
+	if err != nil {
+		t.Fatalf("NewTesseract %v", err)
+	}
+	defer func() {
+		if err := tess.Close(ctx); err != nil {
+			t.Fatalf("Tesseract.Close() error = %v", err)
+		}
+	}()
+
+	tests := []struct {
+		name     string
+		imgSrc   io.Reader
+		wantErr  bool
+		wantText string
+	}{
+		{
+			"nada",
+			&bytes.Buffer{},
+			true,
+			"",
+		},
+		{
+			"logo",
+			bytes.NewBuffer(logoImg),
+			false,
+			logoHOCR,
+		},
+		{
+			"docs",
+			bytes.NewBuffer(docsImg),
+			false,
+			docsHOCR,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tess.LoadImage(ctx, tt.imgSrc, gogosseract.LoadImageOptions{}); (err != nil) != tt.wantErr {
+				t.Fatalf("Tesseract.LoadImage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+
+			text, err := tess.GetHOCR(ctx, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Tesseract.GetText() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			diff := cmp.Diff(text, tt.wantText)
+			if diff != "" {
+				t.Fatalf(diff)
+			}
+		})
+	}
+}
+
+func TestTesseract_GetText_Concurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cache := wazero.NewCompilationCache()
+
+	tessPool := make([]*gogosseract.Tesseract, 5)
+	var group errgroup.Group
+	results := make(chan string, len(tessPool))
+	var err error
+	for i := range tessPool {
+		tessPool[i], err = gogosseract.New(ctx, gogosseract.Config{
+			TrainingData: bytes.NewBuffer(engTrainedData),
+			WASMCache:    cache,
+		})
+		if err != nil {
+			t.Fatalf("i=%d %v", i, err)
+		}
+		i := i
+		group.Go(func() error {
+			if err := tessPool[i].LoadImage(ctx, bytes.NewBuffer(docsImg), gogosseract.LoadImageOptions{}); err != nil {
+				return err
+			}
+			result, err := tessPool[i].GetText(ctx, nil)
+			if err != nil {
+				return err
+			}
+			results <- result
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		t.Fatalf("Parallel Tesseracts client failed %v", err)
+	}
+	for range tessPool {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for results")
+		case r := <-results:
+			if r != docsText {
+				t.Fatalf("results incorrect (%s)", cmp.Diff(r, docsText))
+			}
+		}
+	}
+	for _, tess := range tessPool {
+		if err := tess.Close(ctx); err != nil {
+			t.Fatalf("Tesseract.Close err %v", err)
+		}
+	}
+}
+
+//go:embed internal/wasm/testdata/underline.jpg
+var underlineImg []byte
+
 //go:embed internal/wasm/testdata/docs.png
 var docsImg []byte
 
@@ -128,238 +403,3 @@ const logoHOCR = `<?xml version="1.0" encoding="UTF-8"?>
 
 </body>
 </html>`
-
-func TestNewTesseract(t *testing.T) {
-	ctx := context.Background()
-	cache := wazero.NewCompilationCache()
-	tests := []struct {
-		name    string
-		cfg     gogosseract.Config
-		wantErr bool
-	}{
-		{
-			"no training data",
-			gogosseract.Config{},
-			true,
-		},
-		{
-			"empty training data",
-			gogosseract.Config{TrainingData: bytes.NewBuffer([]byte{})},
-			true,
-		},
-		{
-			"bad variables",
-			gogosseract.Config{
-				TrainingData: bytes.NewBuffer(engTrainedData),
-				Variables:    map[string]string{"asdf": "qwer"},
-			},
-			true,
-		},
-		{
-			"success no lang",
-			gogosseract.Config{
-				TrainingData: bytes.NewBuffer(engTrainedData),
-				WASMCache:    cache,
-			},
-			false,
-		},
-		{
-			"success with lang",
-			gogosseract.Config{
-				TrainingData: bytes.NewBuffer(engTrainedData),
-				Language:     "tesseractishappywithwhateveraslongasyourtrainingdatamatchesup",
-				WASMCache:    cache,
-			},
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := gogosseract.New(ctx, tt.cfg)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewTesseract() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-		})
-	}
-}
-
-type JustAReader struct {
-	buf *bytes.Buffer
-}
-
-func (j JustAReader) Read(p []byte) (n int, err error) {
-	return j.buf.Read(p)
-}
-
-func TestTesseract_GetText(t *testing.T) {
-	ctx := context.Background()
-	tess, err := gogosseract.New(ctx, gogosseract.Config{TrainingData: bytes.NewBuffer(engTrainedData)})
-	if err != nil {
-		t.Fatalf("NewTesseract %v", err)
-	}
-	logoFile, err := os.Open("./internal/wasm/testdata/logo.png")
-	if err != nil {
-		t.Fatalf("os.Open %v", err)
-	}
-
-	tests := []struct {
-		name     string
-		imgSrc   io.Reader
-		wantErr  bool
-		wantText string
-	}{
-		{
-			"nada",
-			&bytes.Buffer{},
-			true,
-			"",
-		},
-		{
-			"logo",
-			bytes.NewBuffer(logoImg),
-			false,
-			logoText,
-		},
-		{
-			"logo file",
-			logoFile,
-			false,
-			logoText,
-		},
-		{
-			"logo with forced copy",
-			JustAReader{bytes.NewBuffer(logoImg)},
-			false,
-			logoText,
-		},
-		{
-			"docs",
-			bytes.NewBuffer(docsImg),
-			false,
-			docsText,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tess.LoadImage(ctx, tt.imgSrc); (err != nil) != tt.wantErr {
-				t.Fatalf("Tesseract.LoadImage() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			text, err := tess.GetText(ctx, nil)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Tesseract.GetText() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			diff := cmp.Diff(text, tt.wantText)
-			if diff != "" {
-				t.Fatalf(diff)
-			}
-		})
-	}
-}
-
-func TestTesseract_GetHOCR(t *testing.T) {
-	ctx := context.Background()
-	tess, err := gogosseract.New(ctx, gogosseract.Config{TrainingData: bytes.NewBuffer(engTrainedData)})
-	if err != nil {
-		t.Fatalf("NewTesseract %v", err)
-	}
-
-	tests := []struct {
-		name     string
-		imgSrc   io.Reader
-		wantErr  bool
-		wantText string
-	}{
-		{
-			"nada",
-			&bytes.Buffer{},
-			true,
-			"",
-		},
-		{
-			"logo",
-			bytes.NewBuffer(logoImg),
-			false,
-			logoHOCR,
-		},
-		{
-			"docs",
-			bytes.NewBuffer(docsImg),
-			false,
-			docsHOCR,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tess.LoadImage(ctx, tt.imgSrc); (err != nil) != tt.wantErr {
-				t.Fatalf("Tesseract.LoadImage() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-
-			text, err := tess.GetHOCR(ctx, nil)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Tesseract.GetText() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			diff := cmp.Diff(text, tt.wantText)
-			if diff != "" {
-				t.Fatalf(diff)
-			}
-		})
-	}
-}
-
-func TestTesseract_GetText_Concurrently(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	cache := wazero.NewCompilationCache()
-
-	tessPool := make([]*gogosseract.Tesseract, 5)
-	var group errgroup.Group
-	results := make(chan string, len(tessPool))
-	var err error
-	for i := range tessPool {
-		tessPool[i], err = gogosseract.New(ctx, gogosseract.Config{
-			TrainingData: bytes.NewBuffer(engTrainedData),
-			WASMCache:    cache,
-		})
-		if err != nil {
-			t.Fatalf("i=%d %v", i, err)
-		}
-		i := i
-		group.Go(func() error {
-			if err := tessPool[i].LoadImage(ctx, bytes.NewBuffer(docsImg)); err != nil {
-				return err
-			}
-			result, err := tessPool[i].GetText(ctx, nil)
-			if err != nil {
-				return err
-			}
-			results <- result
-			return nil
-		})
-	}
-
-	if err := group.Wait(); err != nil {
-		t.Fatalf("Parallel Tesseracts client failed %v", err)
-	}
-	for range tessPool {
-		select {
-		case <-ctx.Done():
-			t.Fatalf("timed out waiting for results")
-		case r := <-results:
-			if r != docsText {
-				t.Fatalf("results incorrect (%s)", cmp.Diff(r, docsText))
-			}
-		}
-	}
-	for _, tess := range tessPool {
-		if err := tess.Close(ctx); err != nil {
-			t.Fatalf("Tesseract.Close err %v", err)
-		}
-	}
-}

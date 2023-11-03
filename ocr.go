@@ -95,11 +95,16 @@ type Tesseract struct {
 	cfg          Config
 }
 
+type LoadImageOptions struct {
+	// RemoveUnderlines uses Leptonica (C img lib) to remove the underlines from the given image. Copies a lot.
+	RemoveUnderlines bool
+}
+
 // LoadImage clears any previously loaded images, and loads the provided img into Tesseract WASM
 // for parsing. Unfortunately the image is fully copied to memory a few times.
 // Leptonica parses it into a Pix object and Tesseract copies that Pix object internally.
 // Keep that in mind when working with large images.
-func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader) error {
+func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader, opts LoadImageOptions) error {
 	logPrefix := "Tesseract.LoadImage"
 
 	if err := t.ocrEngine.ClearImage(ctx); err != nil {
@@ -108,12 +113,12 @@ func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader) error {
 
 	imgByteView, err := t.createByteView(ctx, img)
 	if err != nil {
-		return fmt.Errorf(logPrefix+" createByteView %w", err)
+		return fmt.Errorf(logPrefix+" %w", err)
 	}
 	// As Leptonica will copy the image into it's Pix object, we can free it ASAP
 	defer imgByteView.Delete(ctx)
 
-	ocrErr, err := t.ocrEngine.LoadImage(ctx, imgByteView)
+	ocrErr, err := t.ocrEngine.LoadImage(ctx, imgByteView, opts.RemoveUnderlines)
 	if err != nil || ocrErr != "" {
 		return fmt.Errorf(logPrefix+" ocrEngine.LoadImage ocrErr=(%s) %w", ocrErr, err)
 	}

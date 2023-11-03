@@ -17,11 +17,11 @@ deps:
 version:
 	@echo $(SHORTBUILDTAG)
 
-unit-test:
-	@go test -failfast -race -count=3 ./...
-
 test:
+	@echo "Testing normal build"
 	@go test -failfast -v -race -count=2 ./...
+	@echo "Testing debug build"
+	@go test -tags=gogosseract_debug -failfast -v -race -count=2 ./...
 
 bench:
 	@go test -failfast -benchmem -run=^$ -v -count=2 -bench .  ./...
@@ -30,6 +30,7 @@ recompile: tesseract-wasm/
 	git submodule update --init --recursive
 	cd tesseract-wasm/ && $(MAKE) docker-build
 	cp --remove-destination tesseract-wasm/dist/tesseract-core.wasm internal/wasm/tesseract-core.wasm
+	cp --remove-destination tesseract-wasm/dist/tesseract-core-debug.wasm internal/wasm/tesseract-core-debug.wasm
 	$(MAKE) gen
 
 gen: internal/wasm/tesseract-core.wasm

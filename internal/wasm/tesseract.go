@@ -12,9 +12,6 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-//go:embed tesseract-core.wasm
-var tesseractWASM []byte
-
 type CompileConfig struct {
 	// Stderr and Stdout enable redirection of any logs. If left nil they point at os.Stderr and os.Stdout. Turn off by setting them to io.Discard
 	Stderr, Stdout io.Writer
