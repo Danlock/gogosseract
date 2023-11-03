@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	embind "github.com/jerbob92/wazero-emscripten-embind"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/emscripten"
@@ -13,7 +12,7 @@ import (
 )
 
 // BuildImports implements or mocks the host imports required by Tesseract's compiled WASM module.
-func BuildImports(ctx context.Context, waRT wazero.Runtime, embindEngine embind.Engine, compiledMod wazero.CompiledModule) error {
+func BuildImports(ctx context.Context, waRT wazero.Runtime, compiledMod wazero.CompiledModule) error {
 	logPrefix := "BuildImports"
 	if waRT.Module("wasi_snapshot_preview1") != nil {
 		// If wasi_snapshot_preview1 was already instantiated, the same wazero runtime is being used for multiple Tesseract clients.
@@ -29,11 +28,6 @@ func BuildImports(ctx context.Context, waRT wazero.Runtime, embindEngine embind.
 		return fmt.Errorf(logPrefix+" emscripten.NewFunctionExporterForModule %w", err)
 	}
 	exporter.ExportFunctions(env)
-
-	err = embindEngine.NewFunctionExporterForModule(compiledMod).ExportFunctions(env)
-	if err != nil {
-		return fmt.Errorf(logPrefix+" embind ExportFunctions %w", err)
-	}
 
 	// Even with -sFILESYSTEM=0 and -sPURE_WASI emscripten imports these syscalls and aborts them in JavaScript.
 	// They should never get called, so they panic/no-op if they do.

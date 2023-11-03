@@ -30,7 +30,7 @@ recompile: tesseract-wasm/
 	git submodule update --init --recursive
 	cd tesseract-wasm/ && $(MAKE) docker-build
 	cp --remove-destination tesseract-wasm/dist/tesseract-core.wasm internal/wasm/tesseract-core.wasm
-	$(MAKE) gen
+#	 $(MAKE) gen
 
 gen: internal/wasm/tesseract-core.wasm
 	@go generate ./...

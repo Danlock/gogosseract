@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"io"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ const logoText = "o\n\nkubenav\n"
 
 func TestNewTesseract(t *testing.T) {
 	ctx := context.Background()
-	sharedWASM, err := NewWASM(ctx, WASMConfig{})
+	sharedWASM, err := NewWASMModule(ctx, WASMConfig{})
 	if err != nil {
 		t.Fatalf("NewWASM %v", err)
 	}
@@ -155,7 +154,7 @@ func TestTesseract_GetText(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			text, err := tess.GetText(ctx, nil)
+			text, err := tess.GetText(ctx)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Tesseract.GetText() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -170,7 +169,7 @@ func TestTesseract_GetText(t *testing.T) {
 func TestTesseract_GetText_Concurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	waMo, err := NewWASM(ctx, WASMConfig{})
+	waMo, err := NewWASMModule(ctx, WASMConfig{})
 	if err != nil {
 		t.Fatalf("NewWASM %v", err)
 	}
@@ -183,14 +182,14 @@ func TestTesseract_GetText_Concurrently(t *testing.T) {
 			WASM:         waMo,
 		})
 		if err != nil {
-			t.Fatalf("NewTesseract %v", err)
+			t.Fatalf("i=%d %v", i, err)
 		}
 		i := i
 		group.Go(func() error {
 			if err := tessPool[i].LoadImage(ctx, bytes.NewBuffer(docsImg)); err != nil {
 				return err
 			}
-			result, err := tessPool[i].GetText(ctx, func(progress int32) { slog.Info("Tesseract", "id", i, "progress", progress) })
+			result, err := tessPool[i].GetText(ctx)
 			if err != nil {
 				return err
 			}

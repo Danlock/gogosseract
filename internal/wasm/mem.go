@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 
 	"github.com/tetratelabs/wazero/api"
 	"golang.org/x/exp/constraints"
@@ -45,23 +47,42 @@ func WriteString(ctx context.Context, mod api.Module, str string) (uint64, error
 	return results[0], nil
 }
 
-// WriteBytes malloc's bytes within the WASM modules memory, null terminated so it allocates +1 the inputs size. Remember to defer/call Free.
-func WriteBytes(ctx context.Context, mod api.Module, buf []byte) (uint64, error) {
-	results, err := mod.ExportedFunction("malloc").Call(ctx, uint64(len(buf)+1))
-	if err != nil || len(results) != 1 {
-		return 0, fmt.Errorf("wasm.AllocateBytes _malloc results %v err %w", results, err)
+// WriteFromReader malloc's bytes within the WASM modules memory, null terminated so it allocates +1 the inputs size. Remember to defer/call Free.
+func WriteFromReader(ctx context.Context, mod api.Module, in io.Reader, inSize uint32) (uint64, error) {
+	logPrefix := "WriteFromReader"
+	memLen := inSize + 1
+	results, err := mod.ExportedFunction("malloc").Call(ctx, uint64(memLen))
+	if err != nil || len(results) != 1 || results[0] == 0 {
+		return 0, fmt.Errorf(logPrefix+" wasm.AllocateBytes _malloc failed results %v err %w", results, err)
 	}
-	ptr := uint32(results[0])
-	if !mod.Memory().Write(ptr, buf) {
-		return 0, fmt.Errorf("wasm.AllocateBytes Write failed for %d bytes", len(buf))
+	ptr := results[0]
+	wasmMem, ok := mod.Memory().Read(api.DecodeU32(ptr), memLen)
+	if !ok {
+		return 0, fmt.Errorf(logPrefix+" mod.Memory().Read ing %d bytes failed, OOM", results, err)
 	}
-	if !mod.Memory().WriteByte(ptr+uint32(len(buf)), 0) {
+	wasmMemBuffer := bytes.NewBuffer(wasmMem)
+	wasmMemBuffer.Reset()
+	slog.Info("WriteFromReader fresh buffer", "first10", wasmMem[:10])
+	written, err := io.Copy(wasmMemBuffer, in)
+	if err != nil {
+		return 0, fmt.Errorf(logPrefix+" io.Copy %w", err)
+	}
+	if written != int64(inSize) {
+		return 0, fmt.Errorf(logPrefix+" io.Copy only wrote %d/%d bytes", written, inSize)
+	}
+	if !mod.Memory().WriteByte(api.DecodeU32(ptr)+inSize, 0) {
 		return 0, fmt.Errorf("wasm.AllocateBytes WriteByte 0 failed")
 	}
-	return results[0], nil
+	slog.Info("WriteFromReader filled buffer", "first10", wasmMem[:10])
+	return ptr, nil
 }
 
 func Free[T constraints.Integer](ctx context.Context, mod api.Module, ptr T) {
+	if mod.IsClosed() {
+		// nothing to free
+		return
+	}
+
 	_, err := mod.ExportedFunction("free").Call(ctx, uint64(ptr))
 	if err != nil {
 		panic(fmt.Errorf("wasm.Free err %w", err))

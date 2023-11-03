@@ -4,20 +4,5 @@ package gen
 import "github.com/jerbob92/wazero-emscripten-embind"
 
 func Attach(e embind.Engine) error {
-	if err := e.RegisterClass("ByteView", &ClassByteView{}); err != nil {
-		return err
-	}
-	if err := e.RegisterClass("OCREngine", &ClassOCREngine{}); err != nil {
-		return err
-	}
-	if err := e.RegisterClass("vector_IntRect_", &ClassVector_IntRect_{}); err != nil {
-		return err
-	}
-	if err := e.RegisterClass("vector_TextRect_", &ClassVector_TextRect_{}); err != nil {
-		return err
-	}
-	if err := e.RegisterEnum("TextUnit", EnumTextUnit(0)); err != nil {
-		return err
-	}
 	return nil
 }
