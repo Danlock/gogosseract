@@ -15,7 +15,7 @@ func TestCompileTesseract(t *testing.T) {
 	waRT := wazero.NewRuntime(ctx)
 	defer waRT.Close(ctx)
 
-	_, err := CompileTesseract(ctx, waRT, embEng)
+	_, err := CompileTesseract(ctx, waRT, embEng, CompileConfig{})
 	if err != nil {
 		t.Fatalf("CompileTesseract() error = %v", err)
 	}

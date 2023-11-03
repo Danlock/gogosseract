@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/danlock/gogosseract/internal/gen"
 	"github.com/danlock/gogosseract/internal/wasm"
@@ -14,41 +13,42 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-type TesseractConfig struct {
+type Config struct {
+	wasm.CompileConfig
 	// Languages Tesseract scans for. Defaults to "eng".
 	Language string
 	// Training Data Tesseract uses. Required. Must support the provided language. https://github.com/tesseract-ocr/tessdata_fast for more details.
 	TrainingData io.Reader
 	// Variables are optionally passed into Tesseract as variable config options. Some options are listed at http://www.sk-spell.sk.cx/tesseract-ocr-parameters-in-302-version
 	Variables map[string]string
-	// WazeroRT is an optional wazero.Runtime used to run Tesseract WASM. If this is passed in, closing it is now your responsibility, and Tesseract.Close will not do it for you.
-	// This is useful to pass in for effieciently creating multiple Tesseract objects, since each Tesseract client is single threaded.
-	// It is not recommended to use this wazero.Runtime for running WASM modules other than gogosseract.
-	WazeroRT wazero.Runtime
+	// WASMCache is an optional wazero.CompilationCache used for running multiple Tesseract instances more efficiently.
+	WASMCache wazero.CompilationCache
 }
 
-// NewTesseract creates a new Tesseract class that is ready for use.
+// New creates a new Tesseract class that is ready for use.
 // The Tesseract WASM is initialized with the given trainingdata, language and variable options.
 // Each Tesseract object is NOT safe for concurrent use.
-func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err error) {
+func New(ctx context.Context, cfg Config) (t *Tesseract, err error) {
 	if cfg.TrainingData == nil {
-		return nil, fmt.Errorf("TesseractConfig.TrainingData is required")
+		return nil, fmt.Errorf("Config.TrainingData is required")
 	}
 
 	t = &Tesseract{
 		embindEngine: embind.CreateEngine(embind.NewConfig()),
-		waRT:         cfg.WazeroRT,
+		cfg:          cfg,
 	}
-	if t.waRT == nil {
-		t.waRT = wazero.NewRuntime(ctx)
+	waRTCfg := wazero.NewRuntimeConfig()
+	if t.cfg.WASMCache != nil {
+		waRTCfg = waRTCfg.WithCompilationCache(t.cfg.WASMCache)
 	}
+	t.waRT = wazero.NewRuntimeWithConfig(ctx, waRTCfg)
 
 	ctx = t.embindEngine.Attach(ctx)
-	logPrefix := "NewTesseract"
+	logPrefix := "gogosseract.New"
 
-	t.module, err = wasm.CompileTesseract(ctx, t.waRT, t.embindEngine)
+	t.module, err = wasm.CompileTesseract(ctx, t.waRT, t.embindEngine, cfg.CompileConfig)
 	if err != nil {
-		return nil, fmt.Errorf(logPrefix+" wasm.CompileTesseract %w", err)
+		return nil, fmt.Errorf(logPrefix+" %w", err)
 	}
 
 	t.ocrEngine, err = gen.NewClassOCREngine(t.embindEngine, ctx)
@@ -58,7 +58,7 @@ func NewTesseract(ctx context.Context, cfg TesseractConfig) (t *Tesseract, err e
 
 	trainingDataView, err := t.createByteView(ctx, cfg.TrainingData)
 	if err != nil {
-		return nil, fmt.Errorf(logPrefix+" createByteView %w", err)
+		return nil, fmt.Errorf(logPrefix+" %w", err)
 	}
 	defer trainingDataView.Delete(ctx)
 
@@ -92,7 +92,7 @@ type Tesseract struct {
 	waRT         wazero.Runtime
 	module       api.Module
 	ocrEngine    *gen.ClassOCREngine
-	cfg          TesseractConfig
+	cfg          Config
 }
 
 // LoadImage clears any previously loaded images, and loads the provided img into Tesseract WASM
@@ -147,7 +147,7 @@ func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string
 	return text, nil
 }
 
-// Close shuts down all the resources associated with the Tesseract object, including the Wazero Runtime if it wasn't passed in.
+// Close shuts down all the resources associated with the Tesseract object.
 func (t *Tesseract) Close(ctx context.Context) error {
 	logPrefix := "Tesseract.Close"
 	if err := t.ocrEngine.ClearImage(ctx); err != nil {
@@ -156,9 +156,6 @@ func (t *Tesseract) Close(ctx context.Context) error {
 	if err := t.ocrEngine.Delete(ctx); err != nil {
 		return fmt.Errorf(logPrefix+" t.ocrEngine.Delete %w", err)
 	}
-	if t.cfg.WazeroRT != nil {
-		return nil
-	}
 	return t.waRT.Close(ctx)
 }
 
@@ -166,40 +163,9 @@ func (t *Tesseract) Close(ctx context.Context) error {
 // Works optimally if io.Reader is an io.ReadSeeker (like an os.File) or a bytes.Buffer.
 func (t *Tesseract) createByteView(ctx context.Context, reader io.Reader) (*gen.ClassByteView, error) {
 	logPrefix := "Tesseract.createByteView"
-	var size uint64
-	switch src := reader.(type) {
-	case *bytes.Buffer:
-		size = uint64(src.Len())
-	case io.Seeker:
-		// This case covers os.File while being friendly to any other io.ReadSeeker's
-		streamLen, err := src.Seek(0, io.SeekEnd)
-		if err != nil {
-			return nil, fmt.Errorf(logPrefix+" io.Seeker.Seek SeekEnd %w", err)
-		}
-		// Seek back to the beginning so we can read it all
-		if _, err := src.Seek(0, io.SeekStart); err != nil {
-			return nil, fmt.Errorf(logPrefix+" io.Seeker.Seek SeekStart %w", err)
-		}
-		size = uint64(streamLen)
-	case nil:
-		return nil, fmt.Errorf(logPrefix + " got nil io.Reader")
-	default:
-		// We have failed to avoid copying the data into memory to get the size...
-		// git commit sudoku
-		buf := new(bytes.Buffer)
-		bufLen, err := io.Copy(buf, reader)
-		if err != nil {
-			return nil, fmt.Errorf(logPrefix+" io.Copy %w", err)
-		}
-		// since we read reader, it's empty. point it at buf now.
-		reader = buf
-		size = uint64(bufLen)
-	}
-
-	if size > math.MaxUint32 {
-		return nil, fmt.Errorf(logPrefix+" io.Reader size (%d) too large", size)
-	} else if size == 0 {
-		return nil, fmt.Errorf(logPrefix + " io.Reader was empty")
+	size, err := wasm.GetReaderSize(ctx, &reader)
+	if err != nil {
+		return nil, fmt.Errorf(logPrefix+" %w", err)
 	}
 	// Now that we have the size, expose WASM memory for writing into.
 	byteView, err := gen.NewClassByteView(t.embindEngine, ctx, uint32(size))
@@ -223,7 +189,7 @@ func (t *Tesseract) createByteView(ctx context.Context, reader io.Reader) (*gen.
 	if err != nil {
 		return nil, fmt.Errorf(logPrefix+" io.Copy %w", err)
 	}
-	if uint64(written) != size {
+	if int64(size) != written {
 		return nil, fmt.Errorf(logPrefix+" io.Copy only wrote %d/%d bytes", written, size)
 	}
 

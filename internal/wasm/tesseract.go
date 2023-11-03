@@ -4,7 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/danlock/gogosseract/internal/gen"
 	embind "github.com/jerbob92/wazero-emscripten-embind"
@@ -15,7 +15,12 @@ import (
 //go:embed tesseract-core.wasm
 var tesseractWASM []byte
 
-func CompileTesseract(ctx context.Context, waRT wazero.Runtime, embEng embind.Engine) (api.Module, error) {
+type CompileConfig struct {
+	// Stderr and Stdout enable redirection of any logs. If left nil they point at os.Stderr and os.Stdout. Turn off by setting them to io.Discard
+	Stderr, Stdout io.Writer
+}
+
+func CompileTesseract(ctx context.Context, waRT wazero.Runtime, embEng embind.Engine, cfg CompileConfig) (api.Module, error) {
 	logPrefix := "CompileTesseract"
 	tessCompiled, err := waRT.CompileModule(ctx, tesseractWASM)
 	if err != nil {
@@ -37,8 +42,8 @@ func CompileTesseract(ctx context.Context, waRT wazero.Runtime, embEng embind.En
 		return nil, fmt.Errorf(logPrefix+" BuildImports %w", err)
 	}
 	tessMod, err := waRT.InstantiateModule(ctx, tessCompiled, wazero.NewModuleConfig().
-		WithStderr(os.Stderr).
-		WithStdout(os.Stdout).
+		WithStderr(cfg.Stderr).
+		WithStdout(cfg.Stdout).
 		WithStartFunctions("_initialize"))
 	if err != nil {
 		return nil, fmt.Errorf(logPrefix+" waRT.InstantiateModule %w", err)
