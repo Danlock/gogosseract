@@ -41,7 +41,7 @@ Using Tesseract to parse text from an image.
     tess, err := gogosseract.New(ctx, cfg)
     handleErr(err)
 
-	imageFile, err := os.Open("image.png")
+    imageFile, err := os.Open("image.png")
     handleErr(err)
 
     err = tess.LoadImage(ctx, imageFile, gogosseract.LoadImageOptions{})
@@ -61,7 +61,7 @@ Using a Pool of Tesseract workers for thread safe concurrent image parsing.
         TrainingData: trainingDataFile,
     }
     // Create 10 Tesseract instances that can process image requests concurrently.
-	pool, err := gogosseract.NewPool(ctx, 10, gogosseract.PoolConfig{Config: cfg})
+    pool, err := gogosseract.NewPool(ctx, 10, gogosseract.PoolConfig{Config: cfg})
     handleErr(err)
     defer Pool.Close()
 
