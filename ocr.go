@@ -106,9 +106,8 @@ type LoadImageOptions struct {
 // Keep that in mind when working with large images.
 func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader, opts LoadImageOptions) error {
 	logPrefix := "Tesseract.LoadImage"
-
-	if err := t.ocrEngine.ClearImage(ctx); err != nil {
-		return fmt.Errorf(logPrefix+" t.ocrEngine.ClearImage %w", err)
+	if err := t.ClearImage(ctx); err != nil {
+		return fmt.Errorf(logPrefix+" %w", err)
 	}
 
 	imgByteView, err := t.createByteView(ctx, img)
@@ -123,6 +122,14 @@ func (t *Tesseract) LoadImage(ctx context.Context, img io.Reader, opts LoadImage
 		return fmt.Errorf(logPrefix+" ocrEngine.LoadImage ocrErr=(%s) %w", ocrErr, err)
 	}
 
+	return nil
+}
+
+// ClearImage clears the image from within Tesseract. LoadImage calls this for you.
+func (t *Tesseract) ClearImage(ctx context.Context) error {
+	if err := t.ocrEngine.ClearImage(ctx); err != nil {
+		return fmt.Errorf("ClearImage %w", err)
+	}
 	return nil
 }
 
@@ -155,9 +162,11 @@ func (t *Tesseract) GetHOCR(ctx context.Context, progressCB func(int32)) (string
 // Close shuts down all the resources associated with the Tesseract object.
 func (t *Tesseract) Close(ctx context.Context) error {
 	logPrefix := "Tesseract.Close"
-	if err := t.ocrEngine.ClearImage(ctx); err != nil {
-		return fmt.Errorf(logPrefix+" t.ocrEngine.ClearImage %w", err)
+
+	if err := t.ClearImage(ctx); err != nil {
+		return fmt.Errorf(logPrefix+" %w", err)
 	}
+
 	if err := t.ocrEngine.Delete(ctx); err != nil {
 		return fmt.Errorf(logPrefix+" t.ocrEngine.Delete %w", err)
 	}
