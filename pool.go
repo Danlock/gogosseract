@@ -54,8 +54,7 @@ func NewPool(ctx context.Context, count uint, cfg PoolConfig) (_ *Pool, err erro
 		case err := <-p.errChan:
 			if err != nil {
 				// Wait for any previously setup workers to stop before returning this error so we're in a known state
-				p.shutdown(err)
-				p.wg.Wait()
+				p.Close()
 				return nil, errors.Errorf("failed worker setup due to %w", err)
 			}
 		}

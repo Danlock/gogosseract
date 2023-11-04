@@ -130,7 +130,7 @@ func TestTesseract_GetText(t *testing.T) {
 			bytes.NewBuffer(underlineImg),
 			gogosseract.LoadImageOptions{RemoveUnderlines: true},
 			false,
-			"Adopt A Dolphin\nSubscribe to the Dolphin\nReport newsletter\nDolphin Facts\n\nQuestions 8 Answers\n\nDolphin Database\n",
+			underlineText,
 		},
 		{
 			"logo PNG",
@@ -292,6 +292,8 @@ func TestTesseract_GetText_Concurrently(t *testing.T) {
 
 //go:embed internal/wasm/testdata/underline.jpg
 var underlineImg []byte
+
+const underlineText = "Adopt A Dolphin\nSubscribe to the Dolphin\nReport newsletter\nDolphin Facts\n\nQuestions 8 Answers\n\nDolphin Database\n"
 
 //go:embed internal/wasm/testdata/docs.png
 var docsImg []byte

@@ -4,11 +4,13 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/danlock/gogosseract.svg)](https://pkg.go.dev/github.com/danlock/gogosseract)
 
 
-A reimplementation of https://github.com/otiai10/gosseract without CGo, running Tesseract compiled to WASM with Emscripten via Wazero
+A reimplementation of https://github.com/otiai10/gosseract without CGo, running Tesseract compiled to WASM with Emscripten via Wazero.
+
+Tesseract is an Optical Character Recognition library written in C++.
 
 The WASM is generated from my [personal](https://github.com/Danlock/tesseract-wasm) fork of robertknight's well written tesseract-wasm project.
 
-Note that Tesseract is only compiled with support for the Tesseract LSTM neural network OCR engine, and not for "classic" Tesseract.
+Note that Tesseract is only compiled with support for the LSTM neural network OCR engine, and not for "classic" Tesseract.
 
 # Training Data
 
@@ -25,17 +27,23 @@ https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html
 Using Tesseract to parse text from an image.
 
 ```
+	trainingDataFile, err := os.Open("eng.traineddata")
+    handleErr(err)
+
     cfg := gogosseract.Config{
         Language: "eng",
         TrainingData: trainingDataFile,
     }
-    // While Tesseract's output is very useful for debugging, you have the option to silence or redirect it
+    // While Tesseract's logs are very useful for debugging, you have the option to silence or redirect it
     cfg.Stderr = io.Discard
     cfg.Stdout = io.Discard
     // Compile the Tesseract WASM and run it, loading in the TrainingData and setting any Config Variables provided
     tess, err := gogosseract.New(ctx, cfg)
     handleErr(err)
-    // Load the image, without parsing it.
+
+	imageFile, err := os.Open("image.png")
+    handleErr(err)
+
     err = tess.LoadImage(ctx, imageFile, gogosseract.LoadImageOptions{})
     handleErr(err)
 
