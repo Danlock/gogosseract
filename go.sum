@@ -1,7 +1,3 @@
-github.com/danlock/pkg v0.0.15-586087e h1:X1t2HTQAgIsK6a3Ofz6Dq/7/NafdkduhAULw+NR+5HM=
-github.com/danlock/pkg v0.0.15-586087e/go.mod h1:AGb6QKzqfK0S8InsSdRRmkE2UbjSK1XtCPvP2n09SOU=
-github.com/danlock/pkg v0.0.16-1fac415 h1:2pj0dWk3tPlebJgX12uSbxFoq1u9G/GmWDiU+yWHTzg=
-github.com/danlock/pkg v0.0.16-1fac415/go.mod h1:AGb6QKzqfK0S8InsSdRRmkE2UbjSK1XtCPvP2n09SOU=
 github.com/danlock/pkg v0.0.17-a9828f2 h1:Z6W60Q4cEBYyu6wg0PH5Nw3KKRN12NIOaehqD1Bnsn0=
 github.com/danlock/pkg v0.0.17-a9828f2/go.mod h1:AGb6QKzqfK0S8InsSdRRmkE2UbjSK1XtCPvP2n09SOU=
 github.com/go-logr/logr v1.2.4 h1:g01GSCwiDw2xSZfjJ2/T9M+S6pFdcNtFYsp+Y43HYDQ=
