@@ -27,7 +27,7 @@ https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html
 Using Tesseract to parse text from an image.
 
 ```
-	trainingDataFile, err := os.Open("eng.traineddata")
+    trainingDataFile, err := os.Open("eng.traineddata")
     handleErr(err)
 
     cfg := gogosseract.Config{
