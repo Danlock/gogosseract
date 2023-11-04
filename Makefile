@@ -37,7 +37,7 @@ gen: internal/wasm/tesseract-core.wasm
 	@go generate ./...
 
 coverage:
-	@go test -failfast -covermode=count -coverprofile=$(COVERAGE_PATH)
+	@go test -failfast -covermode=count -coverprofile=$(COVERAGE_PATH) ./...
 
 coverage-html:
 	@rm $(COVERAGE_PATH) || true
