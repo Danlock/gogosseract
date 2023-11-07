@@ -26,7 +26,7 @@ https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html
 
 Using Tesseract to parse text from an image.
 
-```
+```go
     trainingDataFile, err := os.Open("eng.traineddata")
     handleErr(err)
 
@@ -55,7 +55,7 @@ Using Tesseract to parse text from an image.
 
 Using a Pool of Tesseract workers for thread safe concurrent image parsing.
 
-```
+```go
     cfg := gogosseract.Config{
         Language: "eng",
         TrainingData: trainingDataFile,
