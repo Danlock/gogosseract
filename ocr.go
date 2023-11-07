@@ -182,6 +182,14 @@ func (t *Tesseract) createByteView(ctx context.Context, reader io.Reader) (*gen.
 		return nil, errors.Errorf("gen.NewClassByteView malloc %w", err)
 	}
 
+	isOOM, err := byteView.OOM(ctx)
+	if err != nil {
+		return nil, errors.Errorf("gen.NewClassByteView OOM %w", err)
+	}
+	if isOOM {
+		return nil, errors.New("gen.NewClassByteView malloc returned nullptr. The WASM module is out of memory")
+	}
+
 	byteViewDataI, err := byteView.Data(ctx)
 	if err != nil {
 		return nil, errors.Errorf("gen.NewClassByteView %w", err)

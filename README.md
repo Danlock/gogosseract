@@ -63,12 +63,12 @@ Using a Pool of Tesseract workers for thread safe concurrent image parsing.
     // Create 10 Tesseract instances that can process image requests concurrently.
     pool, err := gogosseract.NewPool(ctx, 10, gogosseract.PoolConfig{Config: cfg})
     handleErr(err)
-    defer Pool.Close()
-
     // ParseImage loads the image and waits until the Tesseract worker sends back your result.
     hocr, err := pool.ParseImage(ctx, img, gogosseract.ParseImageOptions{
         IsHOCR: true,
     })
     handleErr(err)
+    // Always remember to Close the pool to release resources
+    handleErr(pool.Close())
 
 ```

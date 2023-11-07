@@ -63,6 +63,19 @@ func (class *ClassByteView) Data(ctx context.Context) (any, error) {
 	return res.(any), nil
 }
 
+func (class *ClassByteView) OOM(ctx context.Context) (bool, error) {
+	res, err := class.CallMethod(ctx, "OOM")
+	if err != nil {
+		return bool(false), err
+	}
+
+	if res == nil {
+		return bool(false), nil
+	}
+
+	return res.(bool), nil
+}
+
 func NewClassByteView(e embind.Engine, ctx context.Context, arg0 uint32) (*ClassByteView, error) {
 	res, err := e.CallPublicSymbol(ctx, "ByteView", arg0)
 	if err != nil {

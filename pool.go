@@ -53,8 +53,9 @@ func NewPool(ctx context.Context, count uint, cfg PoolConfig) (_ *Pool, err erro
 			return nil, errors.Errorf("timed out during worker setup due to %w", context.Cause(ctx))
 		case err := <-p.errChan:
 			if err != nil {
-				// Wait for any previously setup workers to stop before returning this error so we're in a known state
-				p.Close()
+				// Disregard close() errors since err actually caused this.
+				// Further errors will just be an effect of the context cancellation.
+				_ = p.close(false)
 				return nil, errors.Errorf("failed worker setup due to %w", err)
 			}
 		}
@@ -107,7 +108,7 @@ func (p *Pool) runTesseract(ctx context.Context) (err error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			return nil
 		case req := <-p.reqChan:
 			if err := tess.LoadImage(req.ctx, req.img, req.opts.LoadImageOptions); err != nil {
 				req.respChan <- workerResp{err: errors.Errorf(" %w", err)}
@@ -160,7 +161,21 @@ func (p *Pool) ParseImage(ctx context.Context, img io.Reader, opts ParseImageOpt
 }
 
 // Close shuts down the Pool, Close's the Tesseract workers, and waits for the goroutines to end.
-func (p *Pool) Close() {
+// The returned error is a Join of close errors from every worker, if they exist.
+func (p *Pool) Close() error {
+	return p.close(true)
+}
+
+func (p *Pool) close(getErrors bool) error {
 	p.shutdown(errors.New(""))
 	p.wg.Wait()
+	if !getErrors {
+		return nil
+	}
+	// errChan was made big enough to hold an error or a nil from each worker
+	workerErrors := make([]error, cap(p.errChan))
+	for i := range workerErrors {
+		workerErrors[i] = <-p.errChan
+	}
+	return errors.Join(workerErrors...)
 }
