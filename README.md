@@ -12,6 +12,11 @@ The WASM is generated from my [personal](https://github.com/Danlock/tesseract-wa
 
 Note that Tesseract is only compiled with support for the LSTM neural network OCR engine, and not for "classic" Tesseract.
 
+> [!CAUTION]
+> This library and it's dependent libraries was broken by a backwards incompatible change in wazero 1.8.0. This library will not be updated. If you plan on
+> using this library regardless, make sure your dependencies are the same version as what's in the go.mod file in this repo.
+> Also, CGO gosseract is like 6 times faster than this library anyway the last time I checked.
+
 # Training Data
 
 Tesseract requires training data in order to accurately recognize text. The official source is [here](https://github.com/tesseract-ocr/tessdata_fast). Strategies for dealing with this include downloading it at runtime, or embedding the file within your Go binary using go:embed at compile time.
