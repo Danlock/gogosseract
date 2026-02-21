@@ -62,7 +62,7 @@ func BenchmarkGogosseract(b *testing.B) {
 					text, err = tess.GetText(ctx, nil)
 				}
 				if text != tt.wantText {
-					b.Fatalf(cmp.Diff(text, tt.wantText))
+					b.Fatalf("%s", cmp.Diff(text, tt.wantText))
 				}
 			}
 		})

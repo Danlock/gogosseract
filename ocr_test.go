@@ -175,7 +175,7 @@ func TestTesseract_GetText(t *testing.T) {
 			}
 			diff := cmp.Diff(text, tt.wantText)
 			if diff != "" {
-				t.Fatalf(diff)
+				t.Fatalf("%s", diff)
 			}
 		})
 	}
@@ -233,7 +233,7 @@ func TestTesseract_GetHOCR(t *testing.T) {
 			}
 			diff := cmp.Diff(text, tt.wantText)
 			if diff != "" {
-				t.Fatalf(diff)
+				t.Fatalf("%s", diff)
 			}
 		})
 	}
